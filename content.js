@@ -318,22 +318,84 @@ async function runBot() {
 
             console.log('Bot: Coach selected. Waiting for seat map to re-render...');
 
-            // 4. Wait for the available seat buttons to appear (based on your HTML snippet)
+            // 4. Wait for the available seat buttons to appear
             await waitForElement('.btn-seat.seat-available', 10000);
             await sleep(1000); // Small buffer for Angular to finish rendering
 
-            // 5. Find all available seats
-            const availableSeatButtons = document.querySelectorAll('.btn-seat.seat-available');
+            // ==========================================
+            // 5. FIND ADJACENT SEATS (NEW LOGIC)
+            // ==========================================
+            console.log(`Bot: Searching for ${botConfig.totalTickets} adjacent seats...`);
 
-            if (availableSeatButtons.length < botConfig.totalTickets) {
-                throw new Error(`Not enough seats visible. Requested: ${botConfig.totalTickets}, Found: ${availableSeatButtons.length}`);
+            const allRows = document.querySelectorAll('.seat-in-row');
+            let seatsToClick = [];
+
+            // Helper to extract the numeric part from a seat title (e.g., "JHA-11" -> 11)
+            const getSeatNumber = (btn) => {
+                const title = btn.getAttribute('title');
+                if (!title) return -1;
+                const parts = title.split('-');
+                return parseInt(parts[parts.length - 1], 10);
+            };
+
+            // Loop through each row in the coach
+            for (const row of allRows) {
+                const availableBtns = Array.from(row.querySelectorAll('.btn-seat.seat-available'));
+
+                // Skip this row if it doesn't have enough available seats
+                if (availableBtns.length < botConfig.totalTickets) continue;
+
+                // Look for a sequence of consecutive seats in this row
+                for (let i = 0; i <= availableBtns.length - botConfig.totalTickets; i++) {
+                    let isConsecutive = true;
+
+                    for (let j = 0; j < botConfig.totalTickets - 1; j++) {
+                        const currentNum = getSeatNumber(availableBtns[i + j]);
+                        const nextNum = getSeatNumber(availableBtns[i + j + 1]);
+
+                        // If numbers are not consecutive (e.g., 11 and 13), break the sequence check
+                        if (nextNum !== currentNum + 1) {
+                            isConsecutive = false;
+                            break;
+                        }
+                    }
+
+                    if (isConsecutive) {
+                        // Found a consecutive sequence! Store these buttons.
+                        for (let k = 0; k < botConfig.totalTickets; k++) {
+                            seatsToClick.push(availableBtns[i + k]);
+                        }
+                        console.log(`Bot: Found adjacent seats starting at ${availableBtns[i].getAttribute('title')}`);
+                        break; // Break out of the inner loop
+                    }
+                }
+
+                // If we found our seats in this row, stop looking in other rows
+                if (seatsToClick.length === botConfig.totalTickets) {
+                    break;
+                }
             }
 
-            // 6. Click the required number of seats
-            console.log(`Bot: Selecting ${botConfig.totalTickets} seats...`);
-            for (let i = 0; i < botConfig.totalTickets; i++) {
-                availableSeatButtons[i].click();
-                await sleep(500); // Human-like delay between clicking seats
+            // 6. Click the seats
+            if (seatsToClick.length === botConfig.totalTickets) {
+                console.log(`Bot: Clicking ${botConfig.totalTickets} adjacent seats...`);
+                for (const seat of seatsToClick) {
+                    seat.click();
+                    await sleep(500); // Human-like delay
+                }
+            } else {
+                // Fallback: If no adjacent seats are found, select any available seats
+                console.log(`Bot: Warning - Could not find ${botConfig.totalTickets} adjacent seats. Falling back to any available seats.`);
+                const fallbackSeats = document.querySelectorAll('.btn-seat.seat-available');
+
+                if (fallbackSeats.length >= botConfig.totalTickets) {
+                    for (let i = 0; i < botConfig.totalTickets; i++) {
+                        fallbackSeats[i].click();
+                        await sleep(500);
+                    }
+                } else {
+                    throw new Error(`Not enough seats available in this coach.`);
+                }
             }
 
             // Proceed to next state
@@ -344,46 +406,29 @@ async function runBot() {
         // ==========================================
         // STATE: CONFIRMING
         // ==========================================
-        if (botState === STATES.CONFIRMING) {
-            console.log('Bot: Proceeding to purchase...');
-            await sleep(1500); // Wait for the UI to update after seat selection
+        // if (botState === STATES.CONFIRMING) {
+        //     console.log('Bot: Proceeding to purchase...');
+        //     await sleep(1500); // Wait for the UI to update after seat selection
 
-            // Find the "CONTINUE PURCHASE" button
-            const continueBtn = Array.from(document.querySelectorAll('button')).find(el =>
-                el.textContent.toUpperCase().includes('CONTINUE PURCHASE')
-            );
+        //     // Find the "CONTINUE PURCHASE" button
+        //     const continueBtn = Array.from(document.querySelectorAll('button')).find(el =>
+        //         el.textContent.toUpperCase().includes('CONTINUE PURCHASE')
+        //     );
 
-            if (continueBtn) {
-                // Check if it's disabled (sometimes Angular disables it until the exact number of seats is selected)
-                if (continueBtn.disabled || continueBtn.hasAttribute('disabled')) {
-                    console.log('Bot: Continue button is disabled. Waiting...');
-                    await sleep(2000); // Wait a bit more
-                }
+        //     if (continueBtn) {
+        //         // Check if it's disabled (sometimes Angular disables it until the exact number of seats is selected)
+        //         if (continueBtn.disabled || continueBtn.hasAttribute('disabled')) {
+        //             console.log('Bot: Continue button is disabled. Waiting...');
+        //             await sleep(2000); // Wait a bit more
+        //         }
 
-                continueBtn.click();
-                botState = STATES.COMPLETED;
-                console.log('Bot: Seats selected and "CONTINUE PURCHASE" clicked. Please complete the payment manually.');
-            } else {
-                throw new Error('"CONTINUE PURCHASE" button not found.');
-            }
-        }
-
-        // ==========================================
-        // STATE: CONFIRMING
-        // ==========================================
-        if (botState === STATES.CONFIRMING) {
-            console.log('Bot: Proceeding to purchase...');
-            await sleep(1500);
-
-            const continueBtn = Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes('CONTINUE PURCHASE'));
-            if (continueBtn) {
-                continueBtn.click();
-                botState = STATES.COMPLETED;
-                alert('Bot: Seats selected and continued! Please complete the payment manually.');
-            } else {
-                throw new Error('"CONTINUE PURCHASE" button not found.');
-            }
-        }
+        //         continueBtn.click();
+        //         botState = STATES.COMPLETED;
+        //         console.log('Bot: Seats selected and "CONTINUE PURCHASE" clicked. Please complete the payment manually.');
+        //     } else {
+        //         throw new Error('"CONTINUE PURCHASE" button not found.');
+        //     }
+        // }
 
     } catch (error) {
         botState = STATES.ERROR;
